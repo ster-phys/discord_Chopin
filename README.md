@@ -12,10 +12,7 @@ Stop and disconnect.
 ### How to Install
 ```sh
 $ pip install -U pip setuptools
-$ pip install discord.py[voice] python-dotenv
-$ git clone git@github.com:ster-phys/chopin.git
-$ cd ./chopin
-$ pip install .
+$ pip install discord.py[voice] python-dotenv chopin
 ```
 
 ### pip freeze
