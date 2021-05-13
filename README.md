@@ -2,17 +2,15 @@
 This repository is source code for a bot that plays Chopin's composition constantly on discord's voice channel.
 
 ## How to Use
-### ?chopin join
-Connect to Voice Channel and play Chopin's composition.
-
-### ?chopin leave
-Stop and disconnect.
+### ?chopin
+1. if not connected, connect to Voice Channel and play Chopin's composition.
+1. if connected, stop and disconnect.
 
 ## Required Libraries
 ### How to Install
 ```sh
 $ pip install -U pip setuptools
-$ pip install discord.py[voice] python-dotenv chopin
+$ pip install discord.py[voice] python-dotenv chopin youtube_dl
 ```
 
 ### pip freeze
@@ -23,7 +21,7 @@ attrs==21.2.0
 certifi==2020.12.5
 cffi==1.14.5
 chardet==4.0.0
-chopin==0.0.0
+chopin==0.0.9
 discord.py==1.7.2
 idna==2.10
 multidict==5.1.0
