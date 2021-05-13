@@ -1,19 +1,105 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-import discord
-from discord import channel
-from discord.ext import commands
+import asyncio
+import random
 
 import config
-
-# Get TOKEN
 TOKEN = config.DISCORD_TOKEN
 
-# Bot setting
-commandPrefix = "?"
-bot = commands.Bot(command_prefix=commandPrefix)
-bot.remove_command("help")
+import discord
+from discord.ext import commands
+
+import chopin
+import youtube_dl
+
+# prepare chopin
+CHOPIN = chopin.chopin(parallel=True, semaphore=20, output=False)
+
+# prepare youtube_dl
+ytdl_format_options = {
+    "format": "bestaudio/best",
+    "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
+    "restrictfilenames": True,
+    "noplaylist": True,
+    "nocheckcertificate": True,
+    "ignoreerrors": False,
+    "logtostderr": False,
+    "quiet": True,
+    "no_warnings": True,
+    "default_search": "auto",
+    "source_address": "0.0.0.0" # bind to ipv4 since ipv6 addresses cause issues sometimes
+}
+
+ffmpeg_options = {
+    'options': '-vn'
+}
+
+ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, compo=None, volume=1.0):
+        super().__init__(source, volume)
+
+        self.data = data
+        self.compo = compo if compo else CHOPIN.get()
+
+    @classmethod
+    async def prepare_compo(cls, loop=None):
+        compo = CHOPIN.get()
+        url = compo.links[0].url
+
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+
+        filename = data["url"]
+
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data, compo=compo)
+
+
+class Discord_Chopin(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.command()
+    async def chopin(self, ctx):
+        if not ctx.author.voice:
+            await ctx.send("You are not connected to a voice channel.")
+            raise commands.CommandError("Author not connected to a voice channel.")
+        else: # ctx.author.voice
+            if ctx.voice_client is not None:
+                bot_channel_id = ctx.voice_client.channel.id
+                ctx_channel_id = ctx.author.voice.channel.id
+                if bot_channel_id == ctx_channel_id:
+                    if ctx.voice_client.is_playing():
+                        ctx.voice_client.stop()
+                    await ctx.voice_client.disconnect()
+                    return await ctx.send("Successfully disconnected.")
+                else: # bot_channel_id != ctx_channel_id
+                    return await ctx.send("I'm busy now.")
+
+        # ctx.voice_client is None
+        await ctx.author.voice.channel.connect()
+        await ctx.send("Successfully connected.")
+
+        while True:
+            if ctx.voice_client is None:
+                return
+            elif not ctx.voice_client.is_playing():
+                await self.stream(ctx)
+            else:
+                await asyncio.sleep(5)
+
+    async def stream(self, ctx):
+        async with ctx.typing():
+            player = await YTDLSource.prepare_compo(loop=self.bot.loop)
+            ctx.voice_client.play(player, after=lambda e: print(f"Player error: {e}") if e else None)
+
+        await self.now_playing(ctx, player.compo)
+
+    async def now_playing(self, ctx, compo):
+        embed = discord.Embed(title=f"{compo}", color=random.randint(0,255**3))
+        embed.set_author(name=','.join(compo.links[0].artists), url=compo.links[0].url)
+        return await ctx.send(embed=embed)
+
+bot = commands.Bot(command_prefix=("?"))
 
 # Operation at startup
 @bot.event
@@ -26,118 +112,5 @@ async def from_bot(ctx):
     if ctx.author.bot:
         return
 
-import asyncio
-import random
-import chopin
-CHOPIN = chopin.chopin(True, 20)
-
-class Manage():
-    def __init__(self,ctx):
-        # task status
-        self._remove = CHOPIN.get()
-        self._now = CHOPIN.get()
-        self._next = CHOPIN.get()
-        # audio path
-        self._path = self._now.links[0].download()
-        # Need for discord
-        self._ctx = ctx
-        self._voiceClient = self._ctx.guild.voice_client
-
-    async def output(self):
-        if self._voiceClient:
-            embed = discord.Embed(title=str(self._now), color=random.randint(0,255**3))
-            url = "https://www.j-cast.com/trend/assets_c/2020/02/trend_20200214145309-thumb-645xauto-172891.jpg"
-            embed.set_author(name=','.join(self._now.links[0].artists), icon_url=url)
-            await self._ctx.send(embed=embed)
-        return
-
-    async def _process1(self):
-        """
-        Remove MP3 File
-        """
-        await asyncio.sleep(5)
-        self._remove.links[0].delete()
-
-    async def _process2(self):
-        """
-        Play @ Voice Channel
-        """
-        try:
-            audioSource = discord.FFmpegPCMAudio(self._path)
-            self._voiceClient.play(audioSource)
-            await self.output()
-            return True
-        except:
-            return False
-
-    async def _process3(self):
-        """
-        Next Play
-        """
-        await asyncio.sleep(5)
-        self._path = self._next.links[0].download()
-
-    async def proceed(self):
-        await self._process1()
-        if not await self._process2():
-            return
-        await self._process3()
-
-        flag = False
-        while not flag:
-            if self._voiceClient.is_playing():
-                await asyncio.sleep(2)
-            elif not self._voiceClient:
-                return
-            else:
-                flag = True
-
-        self._remove = self._now
-        self._now = self._next
-        self._next = CHOPIN.get()
-
-        if self._voiceClient:
-            await self.proceed()
-        else:
-            return
-
-    def __del__(self):
-        if self._voiceClient.is_playing():
-            self._voiceClient.stop()
-        self._voiceClient = None
-        self._remove.links[0].delete()
-        self._now.links[0].delete()
-        self._next.links[0].delete()
-
-@bot.command()
-async def join(ctx):
-    # User must be on the voice channel to use the command
-    if not ctx.author.voice:
-        await ctx.send("You need to connect to the voice channel.")
-        return
-    # already connected
-    if ctx.guild.voice_client:
-        await ctx.send("Already connected.")
-        return
-    # connect
-    await ctx.author.voice.channel.connect()
-    # play
-    global MNG
-    MNG = Manage(ctx)
-    await MNG.proceed()
-
-@bot.command()
-async def leave(ctx):
-    # check connection
-    if not ctx.guild.voice_client:
-        await ctx.send("There is no connection.")
-        return
-
-    # disconnect
-    await ctx.guild.voice_client.disconnect()
-    await ctx.send("Successfully disconnected.")
-
-    global MNG
-    del MNG
-
+bot.add_cog(Discord_Chopin(bot))
 bot.run(TOKEN)
