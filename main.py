@@ -71,6 +71,7 @@ class Discord_Chopin(commands.Cog):
                     if ctx.voice_client.is_playing():
                         ctx.voice_client.stop()
                     await ctx.voice_client.disconnect()
+                    await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f"?chopin\\Nothing"))
                     return await ctx.send("Successfully disconnected.")
                 else: # bot_channel_id != ctx_channel_id
                     return await ctx.send("I'm busy now.")
@@ -93,6 +94,8 @@ class Discord_Chopin(commands.Cog):
             ctx.voice_client.play(player, after=lambda e: print(f"Player error: {e}") if e else None)
 
         await self.now_playing(ctx, player.compo)
+        await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f"?chopin\\{player.compo}"))
+
 
     async def now_playing(self, ctx, compo):
         embed = discord.Embed(title=f"{compo}", color=random.randint(0,255**3))
@@ -105,6 +108,7 @@ bot = commands.Bot(command_prefix=("?"))
 @bot.event
 async def on_ready():
     print("Logged in as {} ({})".format(bot.user.name,bot.user.id))
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f"?chopin\\Nothing"))
 
 # Ignore commands from bots
 @bot.event
