@@ -1,4 +1,4 @@
 discord.py[voice]
-chopin
+chopin==0.0.9
 python-dotenv
 youtube_dl
