@@ -1,0 +1,4 @@
+discord.py[voice]
+chopin
+python-dotenv
+youtube_dl
