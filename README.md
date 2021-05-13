@@ -10,7 +10,7 @@ This repository is source code for a bot that plays Chopin's composition constan
 ### How to Install
 ```sh
 $ pip install -U pip setuptools
-$ pip install discord.py[voice] python-dotenv chopin youtube_dl
+$ pip install discord.py[voice] chopin youtube_dl
 ```
 
 ### pip freeze
@@ -28,7 +28,6 @@ multidict==5.1.0
 pkg-resources==0.0.0
 pycparser==2.20
 PyNaCl==1.4.0
-python-dotenv==0.17.1
 requests==2.25.1
 six==1.16.0
 typing-extensions==3.10.0.0

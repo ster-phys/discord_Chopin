@@ -1,8 +1,8 @@
 import asyncio
 import random
 
-import config
-TOKEN = config.DISCORD_TOKEN
+from os import getenv
+TOKEN = getenv("DISCORD_TOKEN")
 
 import discord
 from discord.ext import commands
