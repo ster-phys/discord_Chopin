@@ -1,1 +1,1 @@
-disbot: python main.py
+disbot: python play.py
