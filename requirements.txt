@@ -1,3 +1,0 @@
-discord.py[voice]
-chopin
-youtube_dl
