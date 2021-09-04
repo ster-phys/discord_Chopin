@@ -1,112 +1,118 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import asyncio
+import os
+from asyncio.events import AbstractEventLoop
 import random
 
-from os import getenv
-TOKEN = getenv("DISCORD_TOKEN")
-
 import discord
-from discord.ext import commands
+from chopin import Chopin, Composition
+from discord.ext import commands, tasks
+from discord.ext.commands import Bot, Context
 
-import chopin
-
-# prepare chopin
-CHOPIN = chopin.chopin(parallel=True, semaphore=20, output=False)
+chopin:Chopin = Chopin(force=False, output=False, semaphore=16)
 
 ffmpeg_options = {
     'options': '-vn'
 }
 
+class Listener(commands.Cog):
+    def __init__(self, bot:Bot) -> None:
+        super().__init__()
+        self.bot:Bot = bot
+
+    @commands.Cog.listener(name="on_ready")
+    async def operation_at_startup(self) -> None:
+        print(f"Logged in as {self.bot.user.name} ({self.bot.user.id})")
+        return
+
 class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, compo=None, volume=1.0):
-        super().__init__(source, volume)
-        self.compo = compo
+    def __init__(self, source, compo:Composition):
+        super().__init__(original=source, volume=1.0)
+        self.compo:Composition = compo
 
     @classmethod
     def prepare_compo(cls):
-        compo = CHOPIN.get()
-        filename = compo.links[0].download()
-
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), compo=compo)
+        compo = chopin.random_get()
+        path = compo.links[0].download()
+        return cls(discord.FFmpegPCMAudio(source=path, **ffmpeg_options), compo)
 
     @classmethod
-    async def async_prepare_compo(cls, loop=None):
-        compo = CHOPIN.get()
-
+    async def async_prepare_compo(cls, loop:AbstractEventLoop=None):
+        compo = chopin.random_get()
         loop = loop or asyncio.get_event_loop()
-        filename = await loop.run_in_executor(None, lambda: compo.links[0].download())
+        path = await loop.run_in_executor(None, lambda: compo.links[0].download())
+        return cls(discord.FFmpegPCMAudio(source=path, **ffmpeg_options), compo)
 
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), compo=compo)
+class DiscordChopin(commands.Cog):
+    def __init__(self, bot:Bot) -> None:
+        super().__init__()
+        self.bot:Bot = bot
+        self.player_delete:YTDLSource = None
+        self.player_playing:YTDLSource = YTDLSource.prepare_compo()
+        self.player_next:YTDLSource = YTDLSource.prepare_compo()
+        self.default_activity:discord.Activity = discord.Activity(type=discord.ActivityType.listening, name=f"Nothing")
 
-class Discord_Chopin(commands.Cog):
-    def __init__(self, bot) -> None:
-        self.bot = bot
-        self.player_del = None
-        self.player_now = YTDLSource.prepare_compo()
-        self.player_next = YTDLSource.prepare_compo()
-
-    @commands.command()
-    async def chopin(self, ctx) -> None:
-        if not ctx.author.voice:
-            await ctx.send("You are not connected to a voice channel.")
-            raise commands.CommandError("Author not connected to a voice channel.")
-        else: # ctx.author.voice
-            if ctx.voice_client is not None:
-                bot_channel_id = ctx.voice_client.channel.id
-                ctx_channel_id = ctx.author.voice.channel.id
-                if bot_channel_id == ctx_channel_id:
-                    if ctx.voice_client.is_playing():
-                        ctx.voice_client.stop()
-                    await ctx.voice_client.disconnect()
-                    await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f"?chopin\\Nothing"))
-                    return await ctx.send("Successfully disconnected.")
-                else: # bot_channel_id != ctx_channel_id
-                    return await ctx.send("I'm busy now.")
-        # ctx.voice_client is None
-        await ctx.author.voice.channel.connect()
-        await ctx.send("Successfully connected.")
-
-        while True:
-            if ctx.voice_client is None:
+    @commands.check(lambda ctx: bool(ctx.author.voice))
+    @commands.command(name="chopin", aliases=["c"])
+    async def _chopin(self, ctx:Context) -> None:
+        if ctx.voice_client is not None:
+            if ctx.voice_client.channel.id == ctx.author.voice.channel.id:
+                if ctx.voice_client.is_playing():
+                    ctx.voice_client.stop()
+                await ctx.voice_client.disconnect()
+                await self.bot.change_presence(activity=self.default_activity)
+                await ctx.reply("Successfully disconnected.")
                 return
-            elif not ctx.voice_client.is_playing():
-                await self.play(ctx)
             else:
-                await asyncio.sleep(5)
+                await ctx.send("I'm busy now.")
+                return
 
-    async def play(self, ctx) -> None:
+        await ctx.author.voice.channel.connect()
+        await ctx.reply("Successfully connected.")
+
+        self.play.start(ctx=ctx)
+
+    @tasks.loop(seconds=5.0)
+    async def play(self, ctx:Context):
+        if ctx.voice_client is None:
+            return self.play.cancel()
+        elif not ctx.voice_client.is_playing():
+            await self._play(ctx)
+
+    async def _play(self, ctx:Context) -> None:
         async with ctx.typing():
-            self.player_del = self.player_now
-            self.player_now = self.player_next
-            ctx.voice_client.play(self.player_now, after=lambda e: print(f"Player error: {e}") if e else None)
-            await asyncio.sleep(0.5)
+            self.player_delete = self.player_playing
+            self.player_playing = self.player_next
+            ctx.voice_client.play(self.player_playing, after=lambda e: print(f"Player error: {e}") if e else None)
+            await asyncio.sleep(2.0)
 
-        await self.now_playing(ctx, self.player_now.compo)
-        await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f"?chopin\\{self.player_now.compo}"))
-        self.player_del.compo.links[0].delete()
+        await self.send_playing(ctx, self.player_playing.compo)
+        await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=str(self.player_playing.compo)))
+        self.player_delete.compo.links[0].delete()
         self.player_next = await YTDLSource.async_prepare_compo(loop=self.bot.loop)
 
-    async def now_playing(self, ctx, compo):
-        embed = discord.Embed(title=f"{compo}", color=random.randint(0,255**3))
+    async def send_playing(self, ctx:Context, compo:Composition) -> None:
+        embed = discord.Embed(title=str(compo), color=random.randint(0,255**3))
         embed.set_author(name=','.join(compo.links[0].artists), url=compo.links[0].url)
-        return await ctx.send(embed=embed)
-
-    def __del__(self) -> None:
-        self.player_now.compo.links[0].delete()
-        self.player_next.compo.links[0].delete()
-
-bot = commands.Bot(command_prefix=("?"))
-
-# Operation at startup
-@bot.event
-async def on_ready():
-    print("Logged in as {} ({})".format(bot.user.name,bot.user.id))
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=f"?chopin\\Nothing"))
-
-# Ignore commands from bots
-@bot.event
-async def from_bot(ctx):
-    if ctx.author.bot:
+        await ctx.send(embed=embed)
         return
 
-bot.add_cog(Discord_Chopin(bot))
-bot.run(TOKEN)
+    def __del__(self) -> None:
+        self.player_playing.compo.links[0].delete()
+        self.player_next.compo.links[0].delete()
+
+if __name__ == "__main__":
+    TOKEN = os.environ.get("DISCORD_TOKEN_CHOPIN")
+
+    bot = commands.Bot(
+        command_prefix = "/",
+        help_command = None,
+        intents = discord.Intents.all(),
+        activity = discord.Activity(name="Nothing", type=discord.ActivityType.playing),
+    )
+
+    bot.add_cog(Listener(bot))
+    bot.add_cog(DiscordChopin(bot))
+    bot.run(TOKEN)
