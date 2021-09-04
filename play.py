@@ -4,6 +4,7 @@
 import asyncio
 import os
 import random
+import subprocess
 from asyncio.events import AbstractEventLoop
 
 import discord
@@ -34,15 +35,29 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
     @classmethod
     def prepare_compo(cls):
-        compo = chopin.random_get()
-        path = compo.links[0].download()
+        flag = False
+        while not flag:
+            try:
+                compo = chopin.random_get()
+                path = compo.links[0].download()
+                flag = True
+            except subprocess.CalledProcessError:
+                pass
+
         return cls(discord.FFmpegPCMAudio(source=path, **ffmpeg_options), compo)
 
     @classmethod
     async def async_prepare_compo(cls, loop:AbstractEventLoop=None):
-        compo = chopin.random_get()
-        loop = loop or asyncio.get_event_loop()
-        path = await loop.run_in_executor(None, lambda: compo.links[0].download())
+        flag = False
+        while not flag:
+            try:
+                compo = chopin.random_get()
+                loop = loop or asyncio.get_event_loop()
+                path = await loop.run_in_executor(None, lambda: compo.links[0].download())
+                flag = True
+            except subprocess.CalledProcessError:
+                pass
+
         return cls(discord.FFmpegPCMAudio(source=path, **ffmpeg_options), compo)
 
 class DiscordChopin(commands.Cog):
