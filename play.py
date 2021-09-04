@@ -3,8 +3,8 @@
 
 import asyncio
 import os
-from asyncio.events import AbstractEventLoop
 import random
+from asyncio.events import AbstractEventLoop
 
 import discord
 from chopin import Chopin, Composition
