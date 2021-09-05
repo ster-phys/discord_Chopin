@@ -88,13 +88,15 @@ class DiscordChopin(commands.Cog):
         await ctx.reply("Successfully connected.")
 
         self.play.start(ctx=ctx)
+        return
 
     @tasks.loop(seconds=5.0)
-    async def play(self, ctx:Context):
+    async def play(self, ctx:Context) -> None:
         if ctx.voice_client is None:
             return self.play.cancel()
         elif not ctx.voice_client.is_playing():
             await self._play(ctx)
+        return
 
     async def _play(self, ctx:Context) -> None:
         async with ctx.typing():
@@ -107,6 +109,7 @@ class DiscordChopin(commands.Cog):
         await self.bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=str(self.player_playing.compo)))
         self.player_delete.compo.links[0].delete()
         self.player_next = await YTDLSource.async_prepare_compo(loop=self.bot.loop)
+        return
 
     async def send_playing(self, ctx:Context, compo:Composition) -> None:
         embed = discord.Embed(title=str(compo), color=random.randint(0,255**3))
